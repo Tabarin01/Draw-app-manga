@@ -16,6 +16,7 @@ import * as THREE from 'three';
 const vertexShader = /* glsl */ `
 #include <common>
 #include <batching_pars_vertex>
+#include <color_pars_vertex>
 #include <morphtarget_pars_vertex>
 #include <skinning_pars_vertex>
 
@@ -25,6 +26,7 @@ varying vec3 vViewNormal;
 void main() {
   vMapUv = uv;
 
+  #include <color_vertex>
   #include <batching_vertex>
   #include <beginnormal_vertex>
   #include <morphinstance_vertex>
@@ -54,6 +56,8 @@ uniform float faceFlat;
 uniform float forceInk;
 uniform float isSkin;
 
+#include <color_pars_fragment>
+
 varying vec2 vMapUv;
 varying vec3 vViewNormal;
 
@@ -70,6 +74,10 @@ void main() {
   // Versione "sfocata" (mipmap più bassa) usata per le campiture: un retino copre
   // una zona uniforme, non deve inseguire ogni sfumatura dipinta nella texture.
   vec3 albedoSoft = baseColor;
+  #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
+    albedo.rgb *= vColor.rgb;
+    albedoSoft *= vColor.rgb;
+  #endif
   if (hasMap) {
     albedo *= texture(map, vMapUv);
     albedoSoft *= texture(map, vMapUv, 2.0).rgb;
@@ -178,6 +186,7 @@ export function createGBufferMaterial(
       lightDirView: shared.lightDirView,
       faceFlat: shared.faceFlat,
     },
+    vertexColors: source.vertexColors,
     side: source.side,
     depthWrite: source.depthWrite,
     depthTest: true,
