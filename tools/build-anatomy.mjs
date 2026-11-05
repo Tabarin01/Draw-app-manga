@@ -4,6 +4,7 @@
  *   public/anatomy/skeleton.glb  — ossa mobili e centri articolari (la base)
  *   public/anatomy/organs.glb    — organi interni
  *   public/anatomy/vessels.glb   — vasi sanguigni (arterie rosse, vene blu)
+ *   public/anatomy/nerves.glb    — sistema nervoso (per ora solo l'encefalo: l'atlante non ha il resto)
  *
  * BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution 4.0 International
  * https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
@@ -577,6 +578,28 @@ const vesselPieces = [...filesOf('cardiovascular system')]
   .map((fj) => ({ fj, color: vesselColor(fj) }));
 const vessels = buildLayer(vesselPieces, (n) => (n > 3000 ? 0.0015 : n > 600 ? 0.001 : 0), { crossesJoints: true });
 
+console.log('Sistema nervoso…');
+// Dell'intero sistema nervoso l'atlante contiene solo l'encefalo: il "midollo spinale" è un
+// moncone di 3.5 cm del canale centrale e i nervi periferici mancano del tutto.
+// I ventricoli (cavità interne all'encefalo) non si vedono e restano fuori.
+const NERVOUS = [
+  ['telencephalon', 'Emisferi cerebrali', 0xe9c6bc],
+  ['diencephalon', 'Diencefalo', 0xdcb3a6],
+  ['cerebellum', 'Cervelletto', 0xd29f92],
+  ['brainstem', 'Tronco encefalico', 0xd8b49a],
+];
+const ventricles = filesOf('ventricular system of neuraxis');
+const usedByNerves = new Set();
+const nervePieces = [];
+const nerveList = [];
+for (const [name, label, color] of NERVOUS) {
+  const fjs = [...filesOf(name)].filter((fj) => !ventricles.has(fj) && !usedByNerves.has(fj));
+  if (fjs.length === 0) { console.warn(`  (non presente nell'atlante: ${name})`); continue; }
+  for (const fj of fjs) { usedByNerves.add(fj); nervePieces.push({ fj, color }); }
+  nerveList.push({ name, label });
+}
+const nerves = buildLayer(nervePieces, (n) => (n > 5000 ? 0.0022 : n > 1500 ? 0.0015 : 0));
+
 // ---------------------------------------------------------------------------
 // Scrittura GLB
 // ---------------------------------------------------------------------------
@@ -640,3 +663,4 @@ console.log(`Fatto (altezza modello ${modelHeight} m):`);
 report('scheletro', 'skeleton.glb', writeGlb(boneMeshes, { attribution: ATTRIBUTION, modelHeight, heads, centers, extra }, path.join(outDir, 'skeleton.glb')), boneMeshes);
 report('organi', 'organs.glb', writeGlb([{ id: 'organs', ...organs }], { attribution: ATTRIBUTION, jointNames, organs: organList }, path.join(outDir, 'organs.glb')), [organs]);
 report('vasi sanguigni', 'vessels.glb', writeGlb([{ id: 'vessels', ...vessels }], { attribution: ATTRIBUTION, jointNames }, path.join(outDir, 'vessels.glb')), [vessels]);
+report('sistema nervoso', 'nerves.glb', writeGlb([{ id: 'nerves', ...nerves }], { attribution: ATTRIBUTION, jointNames, parts: nerveList }, path.join(outDir, 'nerves.glb')), [nerves]);

@@ -1,6 +1,6 @@
 # Attribuzione
 
-`skeleton.glb`, `organs.glb` e `vessels.glb` sono derivati da **BodyParts3D 4.0**:
+`skeleton.glb`, `organs.glb`, `vessels.glb` e `nerves.glb` sono derivati da **BodyParts3D 4.0**:
 
 > BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International
 
@@ -15,10 +15,10 @@ pubblicazione commerciale conviene una conferma scritta dal DBCLS.
 
 Generati con `tools/build-anatomy.mjs`:
 - le parti anatomiche sono raggruppate nelle ossa mobili dello scheletro dell'app,
-  negli organi interni e nei vasi sanguigni
+  negli organi interni, nei vasi sanguigni e nel sistema nervoso
 - coordinate convertite (mm, Z in alto → metri, Y in alto) e traslate (piedi a terra)
 - mesh dense alleggerite con clustering dei vertici
 - centri articolari calcolati dalla geometria e salvati negli `extras` della scena
 - organi e vasi colorati per convenzione anatomica e legati alle ossa con pesi di skinning
 
-L'atlante non contiene milza, tiroide e laringe.
+L'atlante non contiene milza, tiroide, laringe, midollo spinale (solo un moncone di 3.5 cm, escluso) e nervi periferici.
