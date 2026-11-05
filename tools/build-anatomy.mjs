@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
- * Costruisce public/anatomy/skeleton.glb a partire dall'atlante BodyParts3D 4.0.
+ * Costruisce i livelli anatomici del corpo a partire dall'atlante BodyParts3D 4.0:
+ *   public/anatomy/skeleton.glb  — ossa mobili e centri articolari (la base)
+ *   public/anatomy/organs.glb    — organi interni
+ *   public/anatomy/vessels.glb   — vasi sanguigni (arterie rosse, vene blu)
  *
  * BodyParts3D, © The Database Center for Life Science, licensed under CC Attribution 4.0 International
  * https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
  *
  * Uso:
  *   1. scarica da https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html
- *        partof_BP3D_4.0_obj_99.zip  (scompattato)  e  partof_element_parts.txt
- *   2. node tools/build-anatomy.mjs <cartella-bp3d> [public/anatomy/skeleton.glb]
- *      (la cartella deve contenere partof_element_parts.txt e obj/partof_BP3D_4.0_obj_99/*.obj)
+ *        partof_BP3D_4.0_obj_99.zip (scompattato), partof_element_parts.txt
+ *        e partof_inclusion_relation_list.txt
+ *   2. node tools/build-anatomy.mjs <cartella-bp3d> [cartella-output]
+ *      (la cartella deve contenere i due .txt e obj/partof_BP3D_4.0_obj_99/*.obj)
  *
  * Cosa fa:
  *   - raggruppa le parti anatomiche (per nome FMA) nelle ossa mobili del nostro scheletro
@@ -18,14 +22,14 @@
  *   - calcola i centri articolari dalla geometria reale:
  *       contatto  = baricentro delle superfici affacciate di due ossa
  *       sfera     = sfera che approssima la testa articolare (anca, spalla)
- *   - scrive un GLB con un nodo per osso e i punti di repere negli "extras" della scena
+ *   - lega organi e vasi alle ossa più vicine (pesi di skinning), così seguono la posa
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [srcDir, outFile = 'public/anatomy/skeleton.glb'] = process.argv.slice(2);
+const [srcDir, outDir = 'public/anatomy'] = process.argv.slice(2);
 if (!srcDir) {
-  console.error('Uso: node tools/build-anatomy.mjs <cartella-bp3d> [output.glb]');
+  console.error('Uso: node tools/build-anatomy.mjs <cartella-bp3d> [cartella-output]');
   process.exit(1);
 }
 const objDir = path.join(srcDir, 'obj', 'partof_BP3D_4.0_obj_99');
@@ -338,22 +342,244 @@ for (const k of Object.keys(extra)) extra[k] = move(extra[k]);
 const centers = {};
 for (const [id, b] of Object.entries(bones)) centers[id] = move(centroid(points(b)));
 
+
+const ATTRIBUTION = 'BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International';
+const applyShift = (pos) => { for (let i = 0; i < pos.length; i += 3) { pos[i] += shift[0]; pos[i + 1] += shift[1]; pos[i + 2] += shift[2]; } };
+
 // ---------------------------------------------------------------------------
-// Mesh finali (alleggerite) e scrittura GLB
+// Livello 1 — Scheletro
 // ---------------------------------------------------------------------------
-console.log('Alleggerimento e scrittura…');
-const meshes = [];
-let totalV = 0, totalT = 0;
+console.log('Scheletro: alleggerimento…');
+const boneMeshes = [];
 for (const [id, b] of Object.entries(bones)) {
   const vCount = b.pos.length / 3;
   const cell = vCount > 40000 ? 0.0022 : vCount > 8000 ? 0.0016 : 0;
-  const m = cell ? decimate(b, cell) : { pos: b.pos, idx: b.idx };
-  for (let i = 0; i < m.pos.length; i += 3) { m.pos[i] += shift[0]; m.pos[i + 1] += shift[1]; m.pos[i + 2] += shift[2]; }
-  meshes.push({ id, ...m });
-  totalV += m.pos.length / 3;
-  totalT += m.idx.length / 3;
+  const m = cell ? decimate(b, cell) : { pos: b.pos.slice(), idx: b.idx };
+  applyShift(m.pos);
+  boneMeshes.push({ id, pos: m.pos, idx: m.idx });
+}
+const jointNames = boneMeshes.map((m) => m.id);
+
+// ---------------------------------------------------------------------------
+// Skinning: ogni vertice dei tessuti molli segue le ossa più vicine
+// ---------------------------------------------------------------------------
+/** Nuvola di punti delle ossa (sottocampionata) indicizzata su griglia. */
+const SKIN_CELL = 0.02;
+const boneGrid = new Map();
+boneMeshes.forEach((m, b) => {
+  const sparse = decimate({ pos: m.pos, idx: [] }, 0.006).pos;
+  for (let i = 0; i < sparse.length; i += 3) {
+    const p = [sparse[i], sparse[i + 1], sparse[i + 2]];
+    const k = `${Math.floor(p[0] / SKIN_CELL)},${Math.floor(p[1] / SKIN_CELL)},${Math.floor(p[2] / SKIN_CELL)}`;
+    if (!boneGrid.has(k)) boneGrid.set(k, []);
+    boneGrid.get(k).push([p[0], p[1], p[2], b]);
+  }
+});
+
+/**
+ * Pesi di skinning per un punto: contribuiscono le ossa entro 1.5 cm dalla più vicina,
+ * con peso inversamente proporzionale al quadrato della distanza (al massimo 4 ossa).
+ * Vicino a un'articolazione il tessuto si divide tra le due ossa e si piega in modo continuo.
+ */
+function skinWeights(p) {
+  const cx = Math.floor(p[0] / SKIN_CELL), cy = Math.floor(p[1] / SKIN_CELL), cz = Math.floor(p[2] / SKIN_CELL);
+  const best = new Map();
+  let d1 = Infinity;
+  for (let ring = 0; ring <= 15; ring++) {
+    for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) for (let dz = -ring; dz <= ring; dz++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) !== ring) continue; // solo il guscio nuovo
+      const list = boneGrid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+      if (!list) continue;
+      for (const q of list) {
+        const d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+        if (d < (best.get(q[3]) ?? Infinity)) best.set(q[3], d);
+        if (d < d1) d1 = d;
+      }
+    }
+    if (d1 + 0.015 <= ring * SKIN_CELL) break; // i gusci successivi non possono contenere candidati migliori
+  }
+  const cand = [...best.entries()].filter(([, d]) => d <= d1 + 0.015).sort((a, b) => a[1] - b[1]).slice(0, 4);
+  const w = cand.map(([, d]) => 1 / (d + 0.003) ** 2);
+  const sum = w.reduce((a, b) => a + b, 0);
+  return cand.map(([bone], i) => [bone, w[i] / sum]);
 }
 
+/**
+ * Articolazioni attraversate dai tessuti lunghi (vasi, in futuro muscoli e pelle).
+ * [ossa a monte, osso a valle, ampiezza della fascia di transizione, raggio d'azione]
+ * Vicino al giunto il peso passa con continuità dall'osso a monte a quello a valle
+ * lungo l'asse dell'osso a valle: il tessuto si piega come un tubo invece di strapparsi.
+ */
+const boneIndex = new Map(jointNames.map((id, i) => [id, i]));
+const JOINT_BLENDS = ['L', 'R'].flatMap((S) => [
+  [['pelvis'], `femur_${S}`, 0.06, 0.14],
+  [[`femur_${S}`], `tibia_${S}`, 0.04, 0.1],
+  [[`tibia_${S}`], `foot_${S}`, 0.03, 0.07],
+  [[`scapula_${S}`, `clavicle_${S}`], `humerus_${S}`, 0.05, 0.12],
+  [[`humerus_${S}`], `ulna_${S}`, 0.04, 0.09],
+  [[`humerus_${S}`], `radius_${S}`, 0.04, 0.09],
+  [[`radius_${S}`, `ulna_${S}`], `carpus_${S}`, 0.025, 0.06],
+].map(([parents, child, band, radius]) => {
+  const h = heads[child];
+  const c = centers[child];
+  const axis = [c[0] - h[0], c[1] - h[1], c[2] - h[2]];
+  const len = Math.hypot(...axis);
+  return { parents: parents.map((p) => boneIndex.get(p)), child: boneIndex.get(child), head: h, axis: axis.map((v) => v / len), band, radius };
+}));
+
+const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+function jointAwareWeights(p, list) {
+  const dominant = list[0]?.[0];
+  for (const j of JOINT_BLENDS) {
+    if (dominant !== j.child && !j.parents.includes(dominant)) continue;
+    const d = [p[0] - j.head[0], p[1] - j.head[1], p[2] - j.head[2]];
+    if (Math.hypot(...d) > j.radius) continue;
+    const t = d[0] * j.axis[0] + d[1] * j.axis[1] + d[2] * j.axis[2];
+    const wChild = smoothstep(-j.band, j.band, t);
+    const parent = list.find(([b]) => j.parents.includes(b))?.[0] ?? j.parents[0];
+    return [[j.child, wChild], [parent, 1 - wChild]].filter(([, w]) => w > 0.001).sort((a, b) => b[1] - a[1]);
+  }
+  return list;
+}
+
+/**
+ * Torsione dell'avambraccio: nella prono-supinazione il radio ruota attorno all'ulna e i
+ * tessuti si torcono gradualmente (fermi al gomito, solidali al radio verso il polso).
+ * Il peso destinato all'avambraccio si divide tra ulna e radio in base alla distanza dal gomito.
+ */
+const FOREARMS = ['L', 'R'].map((S) => {
+  const e = heads[`ulna_${S}`];
+  const w = heads[`carpus_${S}`];
+  const axis = [w[0] - e[0], w[1] - e[1], w[2] - e[2]];
+  const len = Math.hypot(...axis);
+  return { ulna: boneIndex.get(`ulna_${S}`), radius: boneIndex.get(`radius_${S}`), elbow: e, axis: axis.map((v) => v / len), len };
+});
+
+function forearmTwist(p, list) {
+  for (const f of FOREARMS) {
+    const share = list.filter(([b]) => b === f.ulna || b === f.radius).reduce((a, [, w]) => a + w, 0);
+    if (share === 0) continue;
+    const d = [p[0] - f.elbow[0], p[1] - f.elbow[1], p[2] - f.elbow[2]];
+    const t = Math.min(1, Math.max(0, (d[0] * f.axis[0] + d[1] * f.axis[1] + d[2] * f.axis[2]) / f.len));
+    const rest = list.filter(([b]) => b !== f.ulna && b !== f.radius);
+    return [...rest, [f.ulna, share * (1 - t)], [f.radius, share * t]].filter(([, w]) => w > 0.001).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  }
+  return list;
+}
+
+/** Pesi quantizzati su 8 bit, con somma esattamente 255. */
+function packWeights(list) {
+  const joints = [0, 0, 0, 0];
+  const weights = [0, 0, 0, 0];
+  list.forEach(([b, w], i) => { joints[i] = b; weights[i] = Math.round(w * 255); });
+  weights[0] += 255 - weights.reduce((a, b) => a + b, 0);
+  return { joints, weights };
+}
+
+// ---------------------------------------------------------------------------
+// Livelli dei tessuti molli: organi e vasi sanguigni
+// ---------------------------------------------------------------------------
+const kids = new Map();
+for (const line of fs.readFileSync(path.join(srcDir, 'partof_inclusion_relation_list.txt'), 'utf8').split(/\r?\n/).slice(1)) {
+  const [, parentName, , childName] = line.split('\t');
+  if (!childName) continue;
+  if (!kids.has(parentName)) kids.set(parentName, []);
+  kids.get(parentName).push(childName);
+}
+/** Tutti i file OBJ di un concetto e dei suoi discendenti. */
+function filesOf(name, seen = new Set()) {
+  const out = new Set(filesByName.get(name) ?? []);
+  for (const c of kids.get(name) ?? []) if (!seen.has(c)) { seen.add(c); for (const f of filesOf(c, seen)) out.add(f); }
+  return out;
+}
+const namesOfFile = new Map();
+for (const [name, fjs] of filesByName) for (const fj of fjs) {
+  if (!namesOfFile.has(fj)) namesOfFile.set(fj, []);
+  namesOfFile.get(fj).push(name);
+}
+
+const hex = (c) => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+
+const ORGANS = [
+  ['heart', 'Cuore', 0x9e2a2b],
+  ['left lung', 'Polmone sinistro', 0xe7a1a8], ['right lung', 'Polmone destro', 0xe7a1a8],
+  ['trachea', 'Trachea', 0xdcc8b4],
+  ['esophagus', 'Esofago', 0xd9907e], ['stomach', 'Stomaco', 0xd9907e],
+  ['duodenum', 'Duodeno', 0xe3a58f], ['small intestine', 'Intestino tenue', 0xe3a58f],
+  ['large intestine', 'Intestino crasso', 0xc98a6c], ['rectum', 'Retto', 0xc98a6c],
+  ['liver', 'Fegato', 0x8b3a2b], ['gallbladder', 'Cistifellea', 0x6b8f3a], ['pancreas', 'Pancreas', 0xe5c07b],
+  ['left kidney', 'Rene sinistro', 0x9b3b3b], ['right kidney', 'Rene destro', 0x9b3b3b],
+  ['left ureter', 'Uretere sinistro', 0xd8b2a0], ['right ureter', 'Uretere destro', 0xd8b2a0],
+  ['urinary bladder', 'Vescica', 0xd8aaa0],
+  ['left adrenal gland', 'Surrene sinistro', 0xd9a441], ['right adrenal gland', 'Surrene destro', 0xd9a441],
+  ['thymus', 'Timo', 0xd8bba8],
+];
+const ARTERY = 0xc0282d;
+const VEIN = 0x2f5fb3;
+
+/**
+ * Colore anatomico convenzionale di un vaso: arterie rosse, vene blu; nel circolo
+ * polmonare è il contrario (le arterie polmonari portano sangue povero di ossigeno).
+ */
+function vesselColor(fj) {
+  const names = (namesOfFile.get(fj) ?? []).join(' | ').toLowerCase();
+  if (/pulmonary vein/.test(names)) return ARTERY;
+  if (/pulmonary (artery|arterial|trunk)/.test(names)) return VEIN;
+  if (/vein|vena|venous|sinus/.test(names)) return VEIN;
+  return ARTERY;
+}
+
+/**
+ * Costruisce un livello: unisce i pezzi (alleggeriti uno per uno, così pezzi vicini
+ * non si fondono), assegna colori per vertice e pesi di skinning.
+ */
+function buildLayer(pieces, cellFor, { crossesJoints = false } = {}) {
+  const pos = [], idx = [], col = [], joints = [], weights = [];
+  for (const { fj, color } of pieces) {
+    const raw = partCache.get(fj) ?? readObj(fj);
+    if (!raw) continue;
+    const cell = cellFor(raw.pos.length / 3);
+    const m = cell ? decimate({ pos: raw.pos, idx: raw.idx }, cell) : { pos: raw.pos.slice(), idx: raw.idx };
+    applyShift(m.pos);
+    const base = pos.length / 3;
+    for (const v of m.pos) pos.push(v);
+    for (const i of m.idx) idx.push(i + base);
+    const rgb = hex(color);
+    for (let i = 0; i < m.pos.length; i += 3) {
+      col.push(rgb[0], rgb[1], rgb[2]);
+      const p = [m.pos[i], m.pos[i + 1], m.pos[i + 2]];
+      const near = skinWeights(p);
+      const pw = packWeights(crossesJoints ? forearmTwist(p, jointAwareWeights(p, near)) : near);
+      joints.push(...pw.joints);
+      weights.push(...pw.weights);
+    }
+  }
+  return { pos, idx, col, joints, weights };
+}
+
+console.log('Organi…');
+const usedByOrgans = new Set();
+const organPieces = [];
+const organList = [];
+for (const [name, label, color] of ORGANS) {
+  const all = [...filesOf(name)];
+  if (all.length === 0) { console.warn(`  (non presente nell'atlante: ${name})`); continue; }
+  const fjs = all.filter((fj) => !usedByOrgans.has(fj)); // es. il retto è già dentro l'intestino crasso
+  for (const fj of fjs) { usedByOrgans.add(fj); organPieces.push({ fj, color }); }
+  organList.push({ name, label });
+}
+const organs = buildLayer(organPieces, (n) => (n > 5000 ? 0.0025 : n > 1500 ? 0.0015 : 0));
+
+console.log('Vasi sanguigni…');
+const vesselPieces = [...filesOf('cardiovascular system')]
+  .filter((fj) => !usedByOrgans.has(fj))
+  .map((fj) => ({ fj, color: vesselColor(fj) }));
+const vessels = buildLayer(vesselPieces, (n) => (n > 3000 ? 0.0015 : n > 600 ? 0.001 : 0), { crossesJoints: true });
+
+// ---------------------------------------------------------------------------
+// Scrittura GLB
+// ---------------------------------------------------------------------------
 function writeGlb(meshes, extras, file) {
   const bin = [];
   let offset = 0;
@@ -365,19 +591,27 @@ function writeGlb(meshes, extras, file) {
     offset += buf.byteLength + pad;
     return bufferViews.length - 1;
   };
+  const attribute = (data, componentType, type, count, extra = {}) => {
+    accessors.push({ bufferView: push(data, 34962), componentType, count, type, ...extra });
+    return accessors.length - 1;
+  };
   for (const m of meshes) {
     const pos = new Float32Array(m.pos);
+    const count = pos.length / 3;
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < pos.length; i++) { min[i % 3] = Math.min(min[i % 3], pos[i]); max[i % 3] = Math.max(max[i % 3], pos[i]); }
-    const idx = pos.length / 3 < 65536 ? new Uint16Array(m.idx) : new Uint32Array(m.idx);
-    accessors.push({ bufferView: push(pos, 34962), componentType: 5126, count: pos.length / 3, type: 'VEC3', min, max });
+    const attributes = { POSITION: attribute(pos, 5126, 'VEC3', count, { min, max }) };
+    if (m.col) attributes.COLOR_0 = attribute(new Uint8Array(m.col), 5121, 'VEC3', count, { normalized: true });
+    if (m.joints) attributes.JOINTS_0 = attribute(new Uint8Array(m.joints), 5121, 'VEC4', count);
+    if (m.weights) attributes.WEIGHTS_0 = attribute(new Uint8Array(m.weights), 5121, 'VEC4', count, { normalized: true });
+    const idx = count < 65536 ? new Uint16Array(m.idx) : new Uint32Array(m.idx);
     accessors.push({ bufferView: push(idx, 34963), componentType: idx instanceof Uint16Array ? 5123 : 5125, count: idx.length, type: 'SCALAR' });
-    gltfMeshes.push({ name: m.id, primitives: [{ attributes: { POSITION: accessors.length - 2 }, indices: accessors.length - 1 }] });
+    gltfMeshes.push({ name: m.id, primitives: [{ attributes, indices: accessors.length - 1 }] });
     nodes.push({ name: m.id, mesh: gltfMeshes.length - 1 });
   }
   const binBuf = Buffer.concat(bin);
   const json = {
-    asset: { version: '2.0', generator: 'draw-app-manga/tools/build-anatomy.mjs', copyright: extras.attribution },
+    asset: { version: '2.0', generator: 'draw-app-manga/tools/build-anatomy.mjs', copyright: ATTRIBUTION },
     scene: 0,
     scenes: [{ nodes: nodes.map((_, i) => i), extras }],
     nodes, meshes: gltfMeshes, accessors, bufferViews,
@@ -392,16 +626,17 @@ function writeGlb(meshes, extras, file) {
   const chunk = (buf, type) => { const h = Buffer.alloc(8); h.writeUInt32LE(buf.byteLength, 0); h.writeUInt32LE(type, 4); return [h, buf]; };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, Buffer.concat([header, ...chunk(jsonBuf, 0x4e4f534a), ...chunk(binBuf, 0x004e4942)]));
+  return fs.statSync(file).size;
 }
 
-writeGlb(meshes, {
-  attribution: 'BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International',
-  modelHeight: +(maxY - minY).toFixed(4),
-  heads,
-  centers,
-  extra,
-}, outFile);
+const report = (label, file, size, meshes) => {
+  const v = meshes.reduce((a, m) => a + m.pos.length / 3, 0);
+  const t = meshes.reduce((a, m) => a + m.idx.length / 3, 0);
+  console.log(`  ${label.padEnd(16)} ${file.padEnd(14)} ${(size / 1e6).toFixed(2)} MB  vertici ${v}  triangoli ${t}`);
+};
 
-console.log(`Fatto: ${outFile}`);
-console.log(`  ossa: ${meshes.length}, vertici: ${totalV}, triangoli: ${totalT}, altezza modello: ${(maxY - minY).toFixed(3)} m`);
-console.log(`  dimensione: ${(fs.statSync(outFile).size / 1e6).toFixed(2)} MB`);
+const modelHeight = +(maxY - minY).toFixed(4);
+console.log(`Fatto (altezza modello ${modelHeight} m):`);
+report('scheletro', 'skeleton.glb', writeGlb(boneMeshes, { attribution: ATTRIBUTION, modelHeight, heads, centers, extra }, path.join(outDir, 'skeleton.glb')), boneMeshes);
+report('organi', 'organs.glb', writeGlb([{ id: 'organs', ...organs }], { attribution: ATTRIBUTION, jointNames, organs: organList }, path.join(outDir, 'organs.glb')), [organs]);
+report('vasi sanguigni', 'vessels.glb', writeGlb([{ id: 'vessels', ...vessels }], { attribution: ATTRIBUTION, jointNames }, path.join(outDir, 'vessels.glb')), [vessels]);
