@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { AnatomyData } from './anatomyAsset';
+import type { AnatomyData, SoftLayerId } from './anatomyAsset';
 import type { BodyDefinition, BoneDef } from './bodyDefinition';
 import { JOINT_TYPE_COLOR, type JointType } from './joints';
 
@@ -7,6 +7,8 @@ import { JOINT_TYPE_COLOR, type JointType } from './joints';
 export const MARKER_LAYER = 1;
 
 const BONE_MATERIAL = new THREE.MeshStandardMaterial({ color: 0xece4d2, roughness: 0.65, metalness: 0, name: 'Osso' });
+/** Organi e vasi: il colore anatomico è per vertice (rosso arterie, blu vene, colori degli organi). */
+const SOFT_MATERIAL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0, name: 'Tessuto' });
 const MARKER_GEOMETRY = new THREE.SphereGeometry(1, 16, 12);
 const SELECTED_COLOR = 0xffd60a;
 
@@ -26,23 +28,36 @@ function markerMaterial(type: JointType | 'selected'): THREE.MeshBasicMaterial {
   return m;
 }
 
+/** Livelli anatomici visualizzabili. Lo scheletro è la base; gli altri si appoggiano su di esso. */
+export type LayerId = 'skeleton' | SoftLayerId;
+
+export const LAYER_LABEL: Record<LayerId, string> = {
+  skeleton: 'Scheletro',
+  organs: 'Organi',
+  vessels: 'Vasi sanguigni',
+};
+
 /**
- * Lo scheletro nella scena: una gerarchia di nodi, uno per osso, posizionati sui giunti.
- * A riposo ogni nodo ha assi allineati al mondo; la posa è solo la rotazione dei nodi.
+ * Il corpo nella scena: una gerarchia di ossa (THREE.Bone), una per osso anatomico,
+ * posizionate sui giunti. A riposo ogni osso ha assi allineati al mondo; la posa è solo
+ * la rotazione delle ossa. I tessuti molli (organi, vasi) sono mesh deformate dalle ossa.
  */
 export class Skeleton {
   readonly root = new THREE.Group();
   readonly markers: THREE.Mesh[] = [];
-  private readonly nodes = new Map<string, THREE.Object3D>();
+  private readonly nodes = new Map<string, THREE.Bone>();
   private readonly geometries: THREE.BufferGeometry[] = [];
+  private readonly layerObjects = new Map<LayerId, THREE.Object3D[]>();
   private selected: string | null = null;
 
   constructor(readonly body: BodyDefinition, anatomy: AnatomyData) {
-    this.root.name = 'Scheletro';
+    this.root.name = 'Corpo';
     const defs = new Map<string, BoneDef>(body.bones.map((b) => [b.id, b]));
+    const boneMeshes: THREE.Object3D[] = [];
+    this.layerObjects.set('skeleton', boneMeshes);
 
     for (const b of body.bones) {
-      const node = new THREE.Group();
+      const node = new THREE.Bone();
       node.name = b.id;
       const parentDef = b.parent ? defs.get(b.parent) : undefined;
       node.position.copy(b.head);
@@ -61,7 +76,28 @@ export class Skeleton {
         mesh.userData.boneId = b.id;
         node.add(mesh);
         this.geometries.push(geo);
+        boneMeshes.push(mesh);
       }
+    }
+
+    // Tessuti molli: legati alle ossa con i pesi di skinning calcolati dall'atlante.
+    // Le matrici di legame si calcolano ora, con il corpo in posizione anatomica.
+    this.root.updateMatrixWorld(true);
+    for (const [id, layer] of anatomy.layers) {
+      const bones = layer.jointNames.map((name) => {
+        const bone = this.nodes.get(name);
+        if (!bone) throw new Error(`Il livello "${id}" usa un osso sconosciuto: ${name}`);
+        return bone;
+      });
+      const geo = layer.geometry.clone();
+      geo.scale(body.scale, body.scale, body.scale);
+      const mesh = new THREE.SkinnedMesh(geo, SOFT_MATERIAL);
+      mesh.name = LAYER_LABEL[id];
+      mesh.frustumCulled = false;
+      this.root.add(mesh);
+      mesh.bind(new THREE.Skeleton(bones), new THREE.Matrix4());
+      this.geometries.push(geo);
+      this.layerObjects.set(id, [mesh]);
     }
 
     for (const c of body.controls) {
@@ -123,6 +159,15 @@ export class Skeleton {
     if (!node) return null;
     this.root.updateMatrixWorld(true);
     return node.getWorldPosition(new THREE.Vector3());
+  }
+
+  /** Livelli disponibili per questo corpo (lo scheletro c'è sempre). */
+  get layers(): LayerId[] {
+    return [...this.layerObjects.keys()];
+  }
+
+  setLayerVisible(layer: LayerId, visible: boolean): void {
+    for (const obj of this.layerObjects.get(layer) ?? []) obj.visible = visible;
   }
 
   setMarkersVisible(visible: boolean): void {

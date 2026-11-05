@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Viewport, type DisplayMode } from './engine/Viewport';
 import { defaultMangaParams } from './engine/manga/params';
 import { buildBodyDefinition, type BodyDefinition, type ControlDef } from './engine/body/bodyDefinition';
-import { Skeleton, MARKER_LAYER } from './engine/body/Skeleton';
+import { Skeleton, MARKER_LAYER, LAYER_LABEL, type LayerId } from './engine/body/Skeleton';
 import { loadAnatomy, type AnatomyData } from './engine/body/anatomyAsset';
 import { GLENOHUMERAL_MAX, neutralPose, solvePose, type Pose, type ShoulderInfo } from './engine/body/nervousSystem';
 import { JOINT_TYPE_COLOR, JOINT_TYPE_LABEL, describeDof, type JointType } from './engine/body/joints';
@@ -25,10 +25,18 @@ const state = {
   height: Number(query.get('h') ?? 170) / 100,
   coordination: query.get('coord') !== '0',
   markers: query.get('markers') !== '0',
+  // ?layers=skeleton,vessels — livelli anatomici visibili (predefinito: tutti)
+  layers: new Set<LayerId>(
+    (query.get('layers')?.split(',') as LayerId[] | undefined) ?? (Object.keys(LAYER_LABEL) as LayerId[]),
+  ),
   selected: query.get('select') ?? 'shoulder_L',
 };
 
-const ANATOMY_URL = `${import.meta.env.BASE_URL}anatomy/skeleton.glb`;
+const ANATOMY_URL = `${import.meta.env.BASE_URL}anatomy/`;
+
+function applyLayerVisibility(): void {
+  for (const layer of skeleton.layers) skeleton.setLayerVisible(layer, state.layers.has(layer));
+}
 
 // Inizializzati in main(), dopo il caricamento dell'atlante anatomico.
 let anatomy: AnatomyData;
@@ -55,6 +63,7 @@ function rebuildBody(height: number): void {
   controlsById = new Map(body.controls.map((c) => [c.id, c]));
   skeleton = new Skeleton(body, anatomy);
   skeleton.setMarkersVisible(state.markers);
+  applyLayerVisibility();
   skeleton.setSelected(state.selected);
   viewport.scene.add(skeleton.root);
   update();
@@ -202,6 +211,16 @@ function buildPanel(): void {
   joint.appendChild(jointBox);
 
   // --- Sistema nervoso ---
+  // --- Livelli anatomici ---
+  const livelli = section(panelEl, 'Livelli');
+  for (const layer of skeleton.layers) {
+    checkbox(livelli, LAYER_LABEL[layer], state.layers.has(layer), (v) => {
+      if (v) state.layers.add(layer);
+      else state.layers.delete(layer);
+      applyLayerVisibility();
+    });
+  }
+
   const nervous = section(panelEl, 'Sistema nervoso');
   checkbox(nervous, 'Coordinamento automatico', state.coordination, (v) => {
     state.coordination = v;
@@ -304,7 +323,7 @@ function applyDemoPose(): void {
 async function main(): Promise<void> {
   setStatus('Caricamento dello scheletro anatomico… 0%');
   try {
-    anatomy = await loadAnatomy(ANATOMY_URL, (f) => setStatus(`Caricamento dello scheletro anatomico… ${Math.round(f * 100)}%`));
+    anatomy = await loadAnatomy(ANATOMY_URL, (f) => setStatus(`Caricamento del corpo anatomico… ${Math.round(f * 100)}%`));
   } catch (err) {
     console.error(err);
     setStatus(`Impossibile caricare lo scheletro: ${(err as Error).message}`);
@@ -322,6 +341,7 @@ async function main(): Promise<void> {
 
   buildPanel();
   skeleton.setMarkersVisible(state.markers);
+  applyLayerVisibility();
   selectControl(state.selected);
   update();
   frameBody((query.get('cam') as CameraName) ?? 'threeQuarter');
