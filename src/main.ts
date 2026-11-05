@@ -210,7 +210,6 @@ function buildPanel(): void {
   jointBox = document.createElement('div');
   joint.appendChild(jointBox);
 
-  // --- Sistema nervoso ---
   // --- Livelli anatomici ---
   const livelli = section(panelEl, 'Livelli');
   for (const layer of skeleton.layers) {
@@ -221,8 +220,9 @@ function buildPanel(): void {
     });
   }
 
-  const nervous = section(panelEl, 'Sistema nervoso');
-  checkbox(nervous, 'Coordinamento automatico', state.coordination, (v) => {
+  // --- Coordinamento dei movimenti (la funzione del sistema nervoso) ---
+  const coordination = section(panelEl, 'Coordinamento dei movimenti');
+  checkbox(coordination, 'Coordinamento automatico', state.coordination, (v) => {
     state.coordination = v;
     update();
   });
@@ -231,7 +231,7 @@ function buildPanel(): void {
   expl.textContent =
     'Acceso: oltre i 30° di elevazione la scapola accompagna il braccio (1° ogni 2°), come nel corpo reale. ' +
     'Spento: lavora solo l\'articolazione della spalla e il braccio si ferma prima.';
-  nervous.appendChild(expl);
+  coordination.appendChild(expl);
 
   // --- Corpo ---
   const corpo = section(panelEl, 'Corpo');

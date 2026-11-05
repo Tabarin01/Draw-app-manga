@@ -28,7 +28,7 @@ export interface AnatomyData {
   layers: Map<SoftLayerId, SoftLayer>;
 }
 
-export type SoftLayerId = 'organs' | 'vessels';
+export type SoftLayerId = 'organs' | 'vessels' | 'nerves';
 
 export interface SoftLayer {
   /** Geometria con colori per vertice e pesi di skinning (skinIndex / skinWeight). */
@@ -37,7 +37,7 @@ export interface SoftLayer {
   jointNames: string[];
 }
 
-const SOFT_LAYERS: SoftLayerId[] = ['organs', 'vessels'];
+const SOFT_LAYERS: SoftLayerId[] = ['organs', 'vessels', 'nerves'];
 
 async function loadGlb(url: string, onProgress?: (e: ProgressEvent) => void) {
   return new GLTFLoader().loadAsync(url, onProgress);

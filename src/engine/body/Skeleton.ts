@@ -35,6 +35,7 @@ export const LAYER_LABEL: Record<LayerId, string> = {
   skeleton: 'Scheletro',
   organs: 'Organi',
   vessels: 'Vasi sanguigni',
+  nerves: 'Sistema nervoso',
 };
 
 /**
