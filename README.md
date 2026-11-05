@@ -1,20 +1,42 @@
 # Draw App Manga
 
-App per chi vuole raccontare a fumetti ma non sa disegnare: si crea il personaggio,
-lo si mette in posa come un manichino 3D, si sceglie l'inquadratura e il motore
-produce la vignetta in stile manga (linee, ombre piatte, retini).
+Un'app per raccontare storie a fumetti e manga **senza saper disegnare**.
 
-**Niente AI generativa**: ogni tratto nasce dalla scena 3D con regole deterministiche.
-La stessa scena produce sempre la stessa vignetta.
+Crei i tuoi personaggi nel dettaglio, come nell'editor di un videogioco, li metti in
+posa come manichini, scegli inquadratura e ambientazione, e l'app restituisce la
+vignetta disegnata in 2D.
 
-## Stato: prototipo del render
+**Niente AI generativa.** Il disegno nasce dalla scena 3D con regole fisse: ogni
+personaggio resta identico da una vignetta all'altra e il risultato è sempre sotto
+il controllo di chi racconta.
 
-Questo primo prototipo serve a validare l'estetica:
+## Come si usa
 
-- personaggio VRM di prova, pose ed espressioni di esempio
-- camera da regista (focale, inquadrature tipiche)
-- render manga: contorni, pieghe, confini tra materiali, ombre a retino/tratteggio/nero, retini a punti
-- esportazione della vignetta in PNG ad alta risoluzione
+1. **Crea il personaggio.** Il corpo è costruito a strati, come quello vero:
+   scheletro, muscoli, pelle, poi viso, capelli e vestiti. Proporzioni e corporatura
+   si personalizzano.
+2. **Mettilo in posa.** Muovi le articolazioni entro i loro limiti reali. Il "sistema
+   nervoso" coordina il resto: la scapola accompagna il braccio, la colonna si piega
+   su tutte le vertebre, la mano si chiude con tutte le dita insieme.
+3. **Componi la scena.** Camera da regista (focale, angolazione, inquadrature),
+   più personaggi, ambientazione.
+4. **Ottieni la vignetta.** Render in stile manga: linee, ombre piatte, retini.
+5. **Impagina.** Tavola con vignette, balloon e onomatopee; esportazione per stampa e web.
+
+## A che punto siamo
+
+| Parte | Stato |
+|---|---|
+| Render manga (linee, ombre, retini, esportazione PNG) | ✅ prototipo |
+| Scheletro anatomico reale | ✅ |
+| Articolazioni con limiti di movimento reali | ✅ |
+| Sistema nervoso: coordinamento dei movimenti | 🟡 prima versione, manca il trascinamento di mani e piedi |
+| Muscoli | ⬜ |
+| Pelle e corporatura | ⬜ |
+| Viso, capelli, vestiti | ⬜ |
+| Scena: più personaggi, ambientazioni | ⬜ |
+| Impaginazione: tavola, balloon, onomatopee | ⬜ |
+| Nervi come strato anatomico visibile | ⬜ |
 
 ## Avvio
 
@@ -23,60 +45,20 @@ npm install
 npm run dev
 ```
 
-Lo stato iniziale si può impostare dall'URL, utile per confronti:
+Clicca un pallino colorato sullo scheletro per scegliere un'articolazione e muoverla
+dal pannello.
 
-```
-http://localhost:5173/?pose=wave&expr=happy&shot=medium&view=manga
-```
+## Tecnica, in breve
 
-| Parametro | Valori |
-|---|---|
-| `mode` | `manga`, `3d` |
-| `view` | `manga`, `lines`, `shading`, `normals`, `depth`, `ids`, `albedo` |
-| `pose` | `tpose`, `relaxed`, `wave`, `hand` |
-| `expr` | `neutral`, `happy`, `angry`, `sad`, `relaxed` |
-| `shot` | `full`, `medium`, `close` |
-| `focal` | lunghezza focale in mm |
-
-## Come funziona il render
-
-Non è un filtro applicato a uno screenshot: il motore renderizza la scena in più
-"passate" invisibili e poi le compone con regole da mangaka.
-
-1. **G-buffer** ([GBufferMaterial.ts](src/engine/manga/GBufferMaterial.ts)): ogni materiale
-   viene temporaneamente sostituito da uno shader che scrive in un colpo solo
-   luminosità/saturazione del colore, illuminazione, normali, ID dell'oggetto e profondità.
-2. **Composizione** ([compositeShader.ts](src/engine/manga/compositeShader.ts)):
-   - linee esterne dai salti di profondità e dal contorno della figura
-   - linee interne da pieghe (normali) e confini tra materiali (ID)
-   - campiture: nero pieno per i colori scuri, retino medio/chiaro per i colori intermedi o saturi
-   - ombre: retino più denso, tratteggio o nero
-   - convenzioni manga: pelle bianca, viso senza ombre "sporche", ciglia e sopracciglia sempre in nero
-3. **Supersampling 2×** per linee pulite, poi riduzione alla dimensione finale.
-
-La fisica (capelli, gonna) viene fatta assestare dopo ogni cambio di posa e poi
-congelata ([loadVRM.ts](src/engine/character/loadVRM.ts)): una vignetta è un'immagine ferma.
-
-## Struttura
-
-```
-src/
-  engine/              motore, indipendente dall'interfaccia
-    Viewport.ts        scena, camera, loop di disegno
-    manga/             pipeline di render manga
-    character/         caricamento VRM, pose, espressioni, fisica
-    export/            esportazione PNG
-  ui/                  controlli del pannello (senza framework)
-  main.ts              avvio e collegamento UI ↔ motore
-public/models/         modelli di prova (vedi LICENSE.md lì dentro)
-```
-
-## Stack
-
-TypeScript, Three.js, [@pixiv/three-vrm](https://github.com/pixiv/three-vrm), Vite.
-In futuro: impacchettamento desktop (Electron/Tauri).
+- TypeScript, Three.js, Vite. Prima web, poi anche app desktop (Electron o Tauri).
+- `src/engine/body/`: corpo, articolazioni, sistema nervoso.
+- `src/engine/manga/`: render manga a più passate.
+- `src/main.ts`: interfaccia.
+- Lo scheletro (`public/anatomy/skeleton.glb`) è generato da `tools/build-anatomy.mjs`
+  a partire dall'atlante anatomico BodyParts3D; le istruzioni sono in testa allo script.
 
 ## Crediti
 
-Modello di prova: AvatarSample_E di VRoid Project (pixiv), uso libero anche commerciale —
-dettagli in [public/models/LICENSE.md](public/models/LICENSE.md).
+Anatomia: BodyParts3D, © The Database Center for Life Science, licenza
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Dettagli in
+[public/anatomy/ATTRIBUTION.md](public/anatomy/ATTRIBUTION.md).
