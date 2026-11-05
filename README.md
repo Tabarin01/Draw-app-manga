@@ -30,14 +30,14 @@ il controllo di chi racconta.
 | Render manga (linee, ombre, retini, esportazione PNG) | ✅ prototipo |
 | Scheletro anatomico reale (livello base) | ✅ |
 | Organi interni e vasi sanguigni, come livelli attivabili che seguono la posa | ✅ |
+| Sistema nervoso come livello anatomico | 🟡 solo encefalo: midollo spinale e nervi periferici mancano nell'atlante |
 | Articolazioni con limiti di movimento reali | ✅ |
-| Sistema nervoso: coordinamento dei movimenti | 🟡 prima versione, manca il trascinamento di mani e piedi |
+| Coordinamento dei movimenti (la funzione del sistema nervoso) | 🟡 prima versione, manca il trascinamento di mani e piedi |
 | Muscoli | ⬜ |
 | Pelle e corporatura | ⬜ |
 | Viso, capelli, vestiti | ⬜ |
 | Scena: più personaggi, ambientazioni | ⬜ |
 | Impaginazione: tavola, balloon, onomatopee | ⬜ |
-| Nervi come strato anatomico visibile | ⬜ |
 
 ## Avvio
 
@@ -55,7 +55,7 @@ dal pannello.
 - `src/engine/body/`: corpo, articolazioni, sistema nervoso.
 - `src/engine/manga/`: render manga a più passate.
 - `src/main.ts`: interfaccia.
-- I livelli anatomici (`public/anatomy/`: scheletro, organi, vasi sanguigni) sono generati
+- I livelli anatomici (`public/anatomy/`: scheletro, organi, vasi sanguigni, sistema nervoso) sono generati
   da `tools/build-anatomy.mjs` a partire dall'atlante anatomico BodyParts3D; le istruzioni
   sono in testa allo script.
 
