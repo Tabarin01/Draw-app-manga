@@ -27,19 +27,20 @@ export class Viewport {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+    this.camera = new THREE.PerspectiveCamera(30, 1, 0.05, 50);
     this.camera.position.set(0, 1.1, 3.5);
+    this.camera.layers.enable(1); // aiuti visivi (marcatori delle articolazioni)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, 0.85, 0);
     this.controls.enableDamping = true;
     this.controls.update();
 
-    // Luci per la vista "3D" (MToon). Il render manga usa la propria luce.
+    // Luci per la vista "3D". Il render manga usa la propria luce.
     this.scene.background = new THREE.Color(0xd8d8dc);
-    const key = new THREE.DirectionalLight(0xffffff, Math.PI);
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
     key.position.set(-1, 2, 2);
-    this.scene.add(key, new THREE.AmbientLight(0xffffff, 0.6));
+    this.scene.add(key, new THREE.HemisphereLight(0xffffff, 0x8a8478, 1.2));
 
     this.manga = new MangaRenderer(params);
 
@@ -59,11 +60,15 @@ export class Viewport {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Inquadra un punto mantenendo la direzione di vista attuale. */
-  frame3D(target: THREE.Vector3, distance: number): void {
-    const dir = new THREE.Vector3().subVectors(this.camera.position, this.controls.target).normalize();
+  /**
+   * Inquadra un oggetto alto `height` metri centrato in `target`, guardandolo dalla
+   * direzione `from` (es. (0,0,1) = di fronte).
+   */
+  frameFrom(target: THREE.Vector3, height: number, from: THREE.Vector3): void {
+    const fov = THREE.MathUtils.degToRad(this.camera.fov);
+    const distance = height / 2 / Math.tan(fov / 2);
     this.controls.target.copy(target);
-    this.camera.position.copy(target).addScaledVector(dir, distance);
+    this.camera.position.copy(target).addScaledVector(from.clone().normalize(), distance);
     this.controls.update();
   }
 

@@ -17,7 +17,7 @@ export function section(parent: HTMLElement, title: string): HTMLElement {
 export function slider(
   parent: HTMLElement,
   label: string,
-  opts: { min: number; max: number; step: number; value: number; unit?: string },
+  opts: { min: number; max: number; step: number; value: number; unit?: string; format?: (v: number) => string },
   onChange: (v: number) => void,
 ): HTMLInputElement {
   const row = document.createElement('label');
@@ -31,7 +31,8 @@ export function slider(
   input.max = String(opts.max);
   input.step = String(opts.step);
   input.value = String(opts.value);
-  const show = () => (out.textContent = `${Number(input.value)}${opts.unit ?? ''}`);
+  const show = () =>
+    (out.textContent = opts.format ? opts.format(Number(input.value)) : `${Number(input.value)}${opts.unit ?? ''}`);
   input.addEventListener('input', () => {
     show();
     onChange(Number(input.value));

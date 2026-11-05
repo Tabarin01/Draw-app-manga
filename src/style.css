@@ -113,6 +113,32 @@ button.primary { width: 100%; background: var(--accent); border-color: var(--acc
 
 input[type='range'] { accent-color: var(--accent); }
 
+.row output { text-align: right; }
+
+.hint { color: var(--muted); line-height: 1.45; margin: 8px 0; }
+
+.joint-select { width: 100%; margin: 4px 0 10px; }
+
+.joint-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.joint-type { color: var(--muted); margin: 2px 0 8px 18px; }
+.joint-info {
+  white-space: pre-line;
+  background: var(--panel-2);
+  border-left: 3px solid #17b5c4;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  margin: 8px 0;
+  line-height: 1.45;
+}
+
+.credits { font-size: 11px; }
+.credits a { color: inherit; }
+
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+.legend { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; color: var(--muted); }
+.legend li { display: flex; align-items: center; gap: 8px; }
+
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; grid-template-rows: 60vh auto; height: auto; }
   .panel { border-left: none; border-top: 1px solid #000; }
