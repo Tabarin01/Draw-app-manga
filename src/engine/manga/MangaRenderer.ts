@@ -133,6 +133,9 @@ export class MangaRenderer {
 
     const prevTarget = renderer.getRenderTarget();
     const prevBackground = scene.background;
+    // Nella vignetta entra solo il layer 0: aiuti visivi (marcatori, guide) restano fuori.
+    const prevLayers = camera.layers.mask;
+    camera.layers.set(0);
     const prevClear = renderer.getClearColor(new THREE.Color());
     const prevClearAlpha = renderer.getClearAlpha();
 
@@ -144,6 +147,7 @@ export class MangaRenderer {
     renderer.clear();
     renderer.render(scene, camera);
     this.restoreMaterials();
+    camera.layers.mask = prevLayers;
     scene.background = prevBackground;
     renderer.setClearColor(prevClear, prevClearAlpha);
 
